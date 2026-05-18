@@ -1,6 +1,8 @@
 # auth_demo
 
-> A production-grade reusable auth starter built in Rust — the foundation for all NexxUpp client projects.
+Authentication demo built using [ezconfig-rs](https://crates.io/crates/ezconfig-rs)
+
+> A production-grade reusable auth starter built in Rust.
 
 ---
 
