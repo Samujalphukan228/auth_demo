@@ -13,68 +13,87 @@ pub struct AuthService;
 impl AuthService {
     // register a new user
     pub async fn register(
-        db: &MySqlPool,
-        redis: &RedisPool,
-        config: &AppConfig,
-        user_email: &str,
-        password: &str,
-    ) -> Result<String, AppError> {
-        let existing = AuthRepository::find_email_status(db, user_email).await?;
+    db: &MySqlPool,
+    redis: &RedisPool,
+    config: &AppConfig,
+    user_email: &str,
+    password: &str,
+) -> Result<String, AppError> {
+    let user_email = crate::utils::normalize_email(user_email); // ← add this
+    let user_email = user_email.as_str();  
 
-        match existing {
-            Some((_, 1)) => {
-                return Err(AppError::Conflict("Email already registered".to_string()));
+    let existing = AuthRepository::find_email_status(db, user_email).await?;
+
+    match existing {
+        // email exists and is verified → reject
+        Some((_, 1)) => {
+            return Err(AppError::Conflict("Email already registered".to_string()));
+        }
+
+        // email exists but unverified → resend verification email automatically
+        Some((user_id, _)) => {
+            // rate limit resend — 2 emails per 10 min per email
+            let resend_key = format!("resend_verify:{}", user_email);
+            let mut conn = redis.get().await?;
+            let attempts: i64 = conn.incr(&resend_key, 1).await?;
+            if attempts == 1 {
+                conn.expire::<_, ()>(&resend_key, 600).await?; // 10 min
             }
-            Some((user_id, _)) => {
-                let token = Uuid::new_v4().to_string();
-                let redis_key = format!("verify:{}", token);
-                let mut conn = redis.get().await?;
-                conn.set_ex::<_, _, ()>(&redis_key, &user_id, 900).await?;
-
-                let link = format!("{}/auth/verify?token={}", config.app_url, token);
-                email::send_verification_email(
-                    &config.brevo_api_key,
-                    &config.brevo_sender_email,
-                    &config.brevo_sender_name,
-                    user_email,
-                    &link,
-                )
-                .await?;
-
-                return Ok("Verification email resent. Please check your inbox.".to_string());
+            if attempts > 2 {
+                return Err(AppError::TooManyRequests);
             }
-            None => {
-                let password_hash = hash::hash_password(password)?;
-                let user_id = Uuid::new_v4().to_string();
-                AuthRepository::create_user(db, &user_id, user_email, &password_hash).await?;
 
-                let token = Uuid::new_v4().to_string();
-                let redis_key = format!("verify:{}", token);
-                let mut conn = redis.get().await?;
-                conn.set_ex::<_, _, ()>(&redis_key, &user_id, 900).await?;
+            let token = Uuid::new_v4().to_string();
+            let redis_key = format!("verify:{}", token);
+            conn.set_ex::<_, _, ()>(&redis_key, &user_id, 900).await?;
 
-                let link = format!("{}/auth/verify?token={}", config.app_url, token);
+            let link = format!("{}/auth/verify?token={}", config.app_url, token);
+            email::send_verification_email(
+                &config.brevo_api_key,
+                &config.brevo_sender_email,
+                &config.brevo_sender_name,
+                user_email,
+                &link,
+            )
+            .await?;
 
-                if let Err(e) = email::send_verification_email(
-                    &config.brevo_api_key,
-                    &config.brevo_sender_email,
-                    &config.brevo_sender_name,
-                    user_email,
-                    &link,
-                )
-                .await
-                {
-                    AuthRepository::delete_user(db, &user_id).await?;
-                    return Err(e);
-                }
+            return Ok("Verification email resent. Please check your inbox.".to_string());
+        }
 
-                return Ok(
-                    "Registration successful. Please check your email to verify your account."
-                        .to_string(),
-                );
+        // email does not exist → create user
+        None => {
+            let password_hash = hash::hash_password(password)?;
+            let user_id = Uuid::new_v4().to_string();
+            AuthRepository::create_user(db, &user_id, user_email, &password_hash).await?;
+
+            let token = Uuid::new_v4().to_string();
+            let redis_key = format!("verify:{}", token);
+            let mut conn = redis.get().await?;
+            conn.set_ex::<_, _, ()>(&redis_key, &user_id, 900).await?;
+
+            let link = format!("{}/auth/verify?token={}", config.app_url, token);
+
+            // if email fails → rollback user creation
+            if let Err(e) = email::send_verification_email(
+                &config.brevo_api_key,
+                &config.brevo_sender_email,
+                &config.brevo_sender_name,
+                user_email,
+                &link,
+            )
+            .await
+            {
+                AuthRepository::delete_user(db, &user_id).await?;
+                return Err(e);
             }
+
+            return Ok(
+                "Registration successful. Please check your email to verify your account."
+                    .to_string(),
+            );
         }
     }
+}
 
     // verify email
     pub async fn verify_email(
@@ -106,6 +125,9 @@ impl AuthService {
         ip: &str,
         device: &str,
     ) -> Result<(String, String), AppError> {
+        let user_email = crate::utils::normalize_email(user_email);
+        let user_email = user_email.as_str();
+
         let rate_key = format!("login_attempts:{}", ip);
         let mut conn = redis.get().await?;
         let attempts: i64 = conn.incr(&rate_key, 1).await?;
@@ -290,32 +312,46 @@ impl AuthService {
 
     // forgot password — send reset email
     pub async fn forgot_password(
-        db: &MySqlPool,
-        redis: &RedisPool,
-        config: &AppConfig,
-        user_email: &str,
-    ) -> Result<(), AppError> {
-        let user_id = AuthRepository::find_id_by_email(db, user_email).await?;
+    db: &MySqlPool,
+    redis: &RedisPool,
+    config: &AppConfig,
+    user_email: &str,
+) -> Result<(), AppError> {
+    let user_email = crate::utils::normalize_email(user_email);
+    let user_email = user_email.as_str();
 
-        if let Some(user_id) = user_id {
-            let token = Uuid::new_v4().to_string();
-            let redis_key = format!("reset:{}", token);
-            let mut conn = redis.get().await?;
-            conn.set_ex::<_, _, ()>(&redis_key, &user_id, 900).await?;
-
-            let link = format!("{}/auth/reset-password?token={}", config.app_url, token);
-            email::send_reset_email(
-                &config.brevo_api_key,
-                &config.brevo_sender_email,
-                &config.brevo_sender_name,
-                user_email,
-                &link,
-            )
-            .await?;
-        }
-
-        Ok(())
+    // rate limit — 2 reset emails per 10 min per email
+    let rate_key = format!("forgot_password:{}", user_email);
+    let mut conn = redis.get().await?;
+    let attempts: i64 = conn.incr(&rate_key, 1).await?;
+    if attempts == 1 {
+        conn.expire::<_, ()>(&rate_key, 600).await?; // 10 min
     }
+    if attempts > 2 {
+        // still return success — never reveal if email exists
+        return Ok(());
+    }
+
+    let user_id = AuthRepository::find_id_by_email(db, user_email).await?;
+
+    if let Some(user_id) = user_id {
+        let token = Uuid::new_v4().to_string();
+        let redis_key = format!("reset:{}", token);
+        conn.set_ex::<_, _, ()>(&redis_key, &user_id, 900).await?;
+
+        let link = format!("{}/auth/reset-password?token={}", config.app_url, token);
+        email::send_reset_email(
+            &config.brevo_api_key,
+            &config.brevo_sender_email,
+            &config.brevo_sender_name,
+            user_email,
+            &link,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
 
     // validate reset token
     pub async fn validate_reset_token(

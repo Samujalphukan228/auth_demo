@@ -16,6 +16,7 @@ use crate::features::auth::service::AuthService;
 use crate::middleware::auth_guard::AuthGuard;
 use crate::state::AppState;
 use serde_json::json;
+use validator::Validate;
 
 fn extract_ip(headers: &HeaderMap) -> String {
     headers
@@ -43,6 +44,7 @@ pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
 ) -> impl IntoResponse {
+    payload.validate()?;
     let message = AuthService::register(
         &state.db,
         &state.redis,
@@ -74,6 +76,7 @@ pub async fn login(
     jar: CookieJar,
     Json(payload): Json<LoginRequest>,
 ) -> impl IntoResponse {
+    payload.validate()?;
     let ip = extract_ip(&headers);
     let device = extract_device(&headers);
 
@@ -195,6 +198,7 @@ pub async fn logout_session(
     axum::extract::Path(session_id): axum::extract::Path<String>,
     Json(payload): Json<SessionActionRequest>,
 ) -> impl IntoResponse {
+    payload.validate()?;
     AuthService::logout_session(
         &state.db,
         &state.redis,
@@ -216,6 +220,7 @@ pub async fn logout_all(
     jar: CookieJar,
     Json(payload): Json<SessionActionRequest>,
 ) -> impl IntoResponse {
+    payload.validate()?;
     AuthService::logout_all(
         &state.db,
         &state.redis,
@@ -250,6 +255,7 @@ pub async fn forgot_password(
     State(state): State<AppState>,
     Json(payload): Json<ForgotPasswordRequest>,
 ) -> impl IntoResponse {
+    payload.validate()?;
     AuthService::forgot_password(
         &state.db,
         &state.redis,
@@ -281,6 +287,7 @@ pub async fn reset_password(
     jar: CookieJar,
     Json(payload): Json<ResetPasswordRequest>,
 ) -> impl IntoResponse {
+    payload.validate()?;
     AuthService::reset_password(
         &state.db,
         &state.redis,

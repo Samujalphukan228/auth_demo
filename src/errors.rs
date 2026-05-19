@@ -5,6 +5,7 @@ use axum::{
 };
 use serde_json::json;
 use thiserror::Error;
+use validator::ValidationErrors;
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -17,6 +18,7 @@ pub enum AppError {
     Unauthorized,
 
     // 403
+    #[allow(dead_code)]
     #[error("Forbidden")]
     Forbidden,
 
@@ -35,6 +37,10 @@ pub enum AppError {
     // 500
     #[error("Internal server error")]
     InternalServerError,
+
+    // 422
+    #[error("Validation error: {0}")]
+    ValidationError(String),
 }
 
 impl IntoResponse for AppError {
@@ -47,6 +53,7 @@ impl IntoResponse for AppError {
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
             AppError::TooManyRequests => (StatusCode::TOO_MANY_REQUESTS, self.to_string()),
             AppError::InternalServerError => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            AppError::ValidationError(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg.clone()),
         };
 
         let body = Json(json!({
@@ -83,5 +90,24 @@ impl From<redis::RedisError> for AppError {
     fn from(e: redis::RedisError) -> Self {
         tracing::error!("Redis error: {e}");
         AppError::InternalServerError
+    }
+}
+
+impl From<ValidationErrors> for AppError {
+    fn from(e: ValidationErrors) -> Self {
+        let messages: Vec<String> = e
+            .field_errors()
+            .into_iter()
+            .flat_map(|(_, errors)| {
+                errors.iter().map(|e| {
+                    e.message
+                        .clone()
+                        .unwrap_or_default()
+                        .to_string()
+                })
+            })
+            .collect();
+
+        AppError::ValidationError(messages.join(", "))
     }
 }
