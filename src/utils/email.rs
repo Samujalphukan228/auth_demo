@@ -2,6 +2,8 @@ use reqwest::Client;
 use serde_json::json;
 use crate::errors::AppError;
 
+const COMPANY_LOGO_URL: &str = "https://res.cloudinary.com/dzulab559/image/upload/v1779202276/nexxupp-removebg-preview_yatbkc.png";
+
 pub async fn send_verification_email(
     api_key: &str,
     sender_email: &str,
@@ -32,10 +34,15 @@ pub async fn send_verification_email(
                         <td align="center" style="padding: 40px 20px;">
                             <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width: 420px;">
                                 
-                                <!-- Header -->
+                                <!-- Logo Header with background -->
                                 <tr>
                                     <td align="center" style="padding-bottom: 32px;">
-                                        <h1 style="margin: 0; font-size: 28px; font-weight: 600; color: #111111;">Your Product</h1>
+                                        <div style="background-color: #f8f8f8; border-radius: 12px; padding: 20px; display: inline-block;">
+                                            <img src="{logo_url}" 
+                                                 alt="Nexxupp Logo" 
+                                                 width="140" 
+                                                 style="max-width: 140px; height: auto; display: block;">
+                                        </div>
                                     </td>
                                 </tr>
                                 
@@ -47,7 +54,6 @@ pub async fn send_verification_email(
                                             Click the button below to verify your email address.
                                         </p>
                                         
-                                        <!-- Centered Button -->
                                         <table cellpadding="0" cellspacing="0" role="presentation" style="margin: 0 auto 32px auto;">
                                             <tr>
                                                 <td align="center">
@@ -77,7 +83,7 @@ pub async fn send_verification_email(
                                 <tr>
                                     <td align="center" style="padding-top: 32px;">
                                         <p style="margin: 0; font-size: 13px; color: #999999;">
-                                            © Your Company. All rights reserved.
+                                            © Nexxupp. All rights reserved.
                                         </p>
                                     </td>
                                 </tr>
@@ -88,6 +94,7 @@ pub async fn send_verification_email(
             </body>
             </html>
             "#,
+            logo_url = COMPANY_LOGO_URL,
             url = verification_link
         )
     });
@@ -125,10 +132,15 @@ pub async fn send_reset_email(
                         <td align="center" style="padding: 40px 20px;">
                             <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width: 420px;">
                                 
-                                <!-- Header -->
+                                <!-- Logo Header with background -->
                                 <tr>
                                     <td align="center" style="padding-bottom: 32px;">
-                                        <h1 style="margin: 0; font-size: 28px; font-weight: 600; color: #111111;">Your Product</h1>
+                                        <div style="background-color: #f8f8f8; border-radius: 12px; padding: 20px; display: inline-block;">
+                                            <img src="{logo_url}" 
+                                                 alt="Nexxupp Logo" 
+                                                 width="140" 
+                                                 style="max-width: 140px; height: auto; display: block;">
+                                        </div>
                                     </td>
                                 </tr>
                                 
@@ -141,7 +153,6 @@ pub async fn send_reset_email(
                                             Click the button below to continue.
                                         </p>
                                         
-                                        <!-- Centered Button -->
                                         <table cellpadding="0" cellspacing="0" role="presentation" style="margin: 0 auto 32px auto;">
                                             <tr>
                                                 <td align="center">
@@ -171,7 +182,7 @@ pub async fn send_reset_email(
                                 <tr>
                                     <td align="center" style="padding-top: 32px;">
                                         <p style="margin: 0; font-size: 13px; color: #999999;">
-                                            © Your Company. All rights reserved.
+                                            © Nexxupp. All rights reserved.
                                         </p>
                                     </td>
                                 </tr>
@@ -182,6 +193,7 @@ pub async fn send_reset_email(
             </body>
             </html>
             "#,
+            logo_url = COMPANY_LOGO_URL,
             url = reset_link
         )
     });
@@ -189,7 +201,7 @@ pub async fn send_reset_email(
     send_email(client, api_key, body).await
 }
 
-// Helper function to reduce code duplication
+// Helper function (unchanged)
 async fn send_email(
     client: Client,
     api_key: &str,

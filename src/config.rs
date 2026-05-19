@@ -16,8 +16,11 @@ pub struct AppConfig {
     pub app_url: String,
     #[serde(default = "default_allowed_origin")]
     pub allowed_origin: String,
+    #[serde(default = "default_cookie_secure")]
+    pub cookie_secure: bool,
 }
 
 fn default_port() -> u16 { 8080 }
 fn default_app_url() -> String { "http://localhost:8080".to_string() }
 fn default_allowed_origin() -> String { "http://localhost:3000".to_string() }
+fn default_cookie_secure() -> bool { false }

@@ -96,6 +96,7 @@ pub async fn login(
         .http_only(true)
         .same_site(SameSite::Strict)
         .max_age(time::Duration::seconds(900)) // 15 min
+        .secure(state.config.cookie_secure)
         .path("/")
         .build();
 
@@ -103,6 +104,7 @@ pub async fn login(
         .http_only(true)
         .same_site(SameSite::Strict)
         .max_age(time::Duration::seconds(60 * 60 * 24 * 30)) // 30 days
+        .secure(state.config.cookie_secure)
         .path("/")
         .build();
 
@@ -115,26 +117,38 @@ pub async fn login(
 // POST /auth/refresh
 pub async fn refresh(
     State(state): State<AppState>,
+    headers: HeaderMap,
     jar: CookieJar,
 ) -> impl IntoResponse {
-    // read refresh token from cookie
     let refresh_token = jar
         .get("refresh_token")
         .map(|c| c.value().to_string())
         .ok_or(AppError::Unauthorized)?;
 
-    let (new_access_token, _) =
-        AuthService::refresh(&state.db, &state.config, &refresh_token).await?;
+    let ip = extract_ip(&headers);
+    let device = extract_device(&headers);
+
+    let (new_access_token, new_refresh_token) =
+        AuthService::refresh(&state.db, &state.config, &refresh_token, &ip, &device).await?;
 
     let access_cookie = Cookie::build(("access_token", new_access_token))
         .http_only(true)
         .same_site(SameSite::Strict)
         .max_age(time::Duration::seconds(900))
+        .secure(state.config.cookie_secure)
+        .path("/")
+        .build();
+
+    let refresh_cookie = Cookie::build(("refresh_token", new_refresh_token))
+        .http_only(true)
+        .same_site(SameSite::Strict)
+        .max_age(time::Duration::seconds(60 * 60 * 24 * 30))
+        .secure(state.config.cookie_secure)
         .path("/")
         .build();
 
     Ok::<_, AppError>((
-        jar.add(access_cookie),
+        jar.add(access_cookie).add(refresh_cookie),
         Json(json!({ "message": "Token refreshed." })),
     ))
 }

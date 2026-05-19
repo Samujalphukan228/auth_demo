@@ -40,8 +40,10 @@ impl AuthService {
                 conn.expire::<_, ()>(&resend_key, 600).await?; // 10 min
             }
             if attempts > 2 {
-                return Err(AppError::TooManyRequests);
-            }
+    return Err(AppError::BadRequest(
+        "Too many verification emails sent. Please wait 10 minutes before trying again.".to_string()
+    ));
+}
 
             let token = Uuid::new_v4().to_string();
             let redis_key = format!("verify:{}", token);
@@ -174,29 +176,60 @@ impl AuthService {
 
     // refresh
     pub async fn refresh(
-        db: &MySqlPool,
-        config: &AppConfig,
-        refresh_token: &str,
-    ) -> Result<(String, String), AppError> {
-        let user_id = jwt::verify_refresh_token(refresh_token, &config.jwt_refresh_secret)?;
+    db: &MySqlPool,
+    config: &AppConfig,
+    refresh_token: &str,
+    ip: &str,
+    device: &str,
+) -> Result<(String, String), AppError> {
+    let user_id = jwt::verify_refresh_token(refresh_token, &config.jwt_refresh_secret)?;
 
-        let token_hash = format!("{:x}", md5::compute(refresh_token));
-        let exists = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM refresh_tokens
-             WHERE token_hash = ? AND user_id = ? AND expires_at > NOW()",
-            token_hash,
-            user_id
-        )
-        .fetch_one(db)
-        .await?;
+    let token_hash = format!("{:x}", md5::compute(refresh_token));
 
-        if exists == 0 {
-            return Err(AppError::Unauthorized);
-        }
+    // check token exists in DB
+    let exists = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM refresh_tokens
+         WHERE token_hash = ? AND user_id = ? AND expires_at > NOW()",
+        token_hash,
+        user_id
+    )
+    .fetch_one(db)
+    .await?;
 
-        let access_token = jwt::generate_access_token(&user_id, &config.jwt_secret)?;
-        Ok((access_token, refresh_token.to_string()))
+    if exists == 0 {
+        return Err(AppError::Unauthorized);
     }
+
+    // delete old refresh token
+    sqlx::query!(
+        "DELETE FROM refresh_tokens WHERE token_hash = ? AND user_id = ?",
+        token_hash,
+        user_id
+    )
+    .execute(db)
+    .await?;
+
+    // generate both new tokens
+    let new_access_token = jwt::generate_access_token(&user_id, &config.jwt_secret)?;
+    let new_refresh_token = jwt::generate_refresh_token(&user_id, &config.jwt_refresh_secret)?;
+
+    // store new refresh token in DB
+    let token_id = Uuid::new_v4().to_string();
+    let new_token_hash = format!("{:x}", md5::compute(&new_refresh_token));
+    sqlx::query!(
+        "INSERT INTO refresh_tokens (id, user_id, token_hash, device, ip, expires_at)
+         VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 DAY))",
+        token_id,
+        user_id,
+        new_token_hash,
+        device,
+        ip
+    )
+    .execute(db)
+    .await?;
+
+    Ok((new_access_token, new_refresh_token))
+}
 
     // logout current device
     pub async fn logout(
@@ -328,9 +361,10 @@ impl AuthService {
         conn.expire::<_, ()>(&rate_key, 600).await?; // 10 min
     }
     if attempts > 2 {
-        // still return success — never reveal if email exists
-        return Ok(());
-    }
+    return Err(AppError::BadRequest(
+        "Too many reset emails requested. Please wait 10 minutes before trying again.".to_string()
+    ));
+}
 
     let user_id = AuthRepository::find_id_by_email(db, user_email).await?;
 
